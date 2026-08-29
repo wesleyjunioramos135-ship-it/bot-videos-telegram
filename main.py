@@ -1,9 +1,9 @@
-import telebot
+iimport telebot
 import time
 from supabase import create_client, Client
 
 # Substitua com os seus dados reais
-API_TOKEN = '8906869920:AAER7XNMG9iZatgfwLCp-K3J-OqhGE0DrTI'
+API_TOKEN = '8927249466:AAGV-V28myKtBoMkBe4jGQcTFatWjqGnUlo'
 SUPABASE_URL = 'https://modoniggvueoemhyyfsx.supabase.co'
 SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1vZG9uaWdndnVlb2VtaHl5ZnN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgwMjA5ODQsImV4cCI6MjEwMzU5Njk4NH0.uRxXnRijkkkq6NYilV3nXKTwWQ4K-CVXq5pJgqCv1U4'
 ADMIN_ID = 8563298081
