@@ -1,4 +1,4 @@
-iimport telebot
+import telebot
 import time
 from supabase import create_client, Client
 
