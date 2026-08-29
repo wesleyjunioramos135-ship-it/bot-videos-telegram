@@ -4,9 +4,9 @@ from supabase import create_client, Client
 
 # Substitua com os seus dados reais
 API_TOKEN = '8906869920:AAER7XNMG9iZatgfwLCp-K3J-OqhGE0DrTI'
-SUPABASE_URL = 'https://modoniggvueoemhyyfsx.supabase.co/rest/v1/'
-SUPABASE_KEY = 'sb_publishable_HLSpiUKa9XQqx2AE1Y48uw___aemm9X'
-ADMIN_ID = 8906869920
+SUPABASE_URL = 'https://modoniggvueoemhyyfsx.supabase.co'
+SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1vZG9uaWdndnVlb2VtaHl5ZnN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgwMjA5ODQsImV4cCI6MjEwMzU5Njk4NH0.uRxXnRijkkkq6NYilV3nXKTwWQ4K-CVXq5pJgqCv1U4'
+ADMIN_ID = 8563298081
 
 bot = telebot.TeleBot(API_TOKEN)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
