@@ -14,12 +14,13 @@ ADMIN_ID = 8237036306
 bot = telebot.TeleBot(API_TOKEN)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Dicionário para gerenciar o andamento e a pausa dos vídeos de cada cliente
 sessoes_usuarios = {}
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    msg = bot.send_message(message.chat.id, "Olá! Insira a senha de acesso:")
+    # Ao iniciar, garante que o teclado especial está fechado
+    markup_remover = telebot.types.ReplyKeyboardRemove()
+    msg = bot.send_message(message.chat.id, "Olá! Insira a senha de acesso:", reply_markup=markup_remover)
     bot.register_next_step_handler(msg, process_password)
 
 @bot.message_handler(commands=['admin'])
@@ -38,8 +39,12 @@ def process_password(message):
     senha_digitada = message.text.strip()
     cliente_info = f"@{message.from_user.username}" if message.from_user.username else f"ID {message.from_user.id}"
     
+    # Cria o Teclado Fixo Inferior com Pausa e Continuar
+    markup_controles = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup_controles.add("⏸ Pausar", "▶️ Continuar")
+    
     if senha_digitada == 'start123vip':
-        bot.send_message(chat_id, "✅ Acesso VIP liberado! Iniciando o envio...")
+        bot.send_message(chat_id, "✅ Acesso VIP liberado! Iniciando os vídeos...", reply_markup=markup_controles)
         bot.send_message(ADMIN_ID, f"🔔 *Acesso VIP:*\nO cliente {cliente_info} acessou com a senha VIP.", parse_mode="Markdown")
         iniciar_sessao_videos(chat_id)
         return
@@ -47,7 +52,7 @@ def process_password(message):
     response = supabase.table('senhas').select('codigo').eq('codigo', senha_digitada).execute()
     if response.data:
         supabase.table('senhas').delete().eq('codigo', senha_digitada).execute()
-        bot.send_message(chat_id, "✅ Senha de prévia aceita! Iniciando os vídeos...")
+        bot.send_message(chat_id, "✅ Senha de prévia aceita! Iniciando os vídeos...", reply_markup=markup_controles)
         bot.send_message(ADMIN_ID, f"🔔 *Senha Única Usada:*\nO cliente {cliente_info} usou a senha `{senha_digitada}`.", parse_mode="Markdown")
         iniciar_sessao_videos(chat_id)
     else:
@@ -61,15 +66,37 @@ def iniciar_sessao_videos(chat_id):
         bot.send_message(chat_id, "Nenhum vídeo cadastrado ainda.")
         return
 
-    # Registra o cliente no sistema para controlar de onde ele parou
     sessoes_usuarios[chat_id] = {
         'videos': videos,
         'index': 0,
         'pausado': False
     }
-    
-    # Inicia o envio em segundo plano (para o botão de pausa funcionar em tempo real)
     threading.Thread(target=enviar_lote_videos, args=(chat_id,)).start()
+
+# Controlador dos botões do teclado fixo
+@bot.message_handler(func=lambda message: message.text in ["⏸ Pausar", "▶️ Continuar"])
+def controle_pausa(message):
+    chat_id = message.chat.id
+    sessao = sessoes_usuarios.get(chat_id)
+    
+    if not sessao:
+        bot.reply_to(message, "Nenhum envio em andamento.", reply_markup=telebot.types.ReplyKeyboardRemove())
+        return
+        
+    if message.text == "⏸ Pausar":
+        if not sessao['pausado']:
+            sessao['pausado'] = True
+            bot.reply_to(message, "⏸ *Envio pausado.* (Pode demorar 1 segundo para o vídeo atual terminar de cair).", parse_mode="Markdown")
+        else:
+            bot.reply_to(message, "O envio já está pausado.")
+            
+    elif message.text == "▶️ Continuar":
+        if sessao['pausado']:
+            sessao['pausado'] = False
+            bot.reply_to(message, "▶️ *Retomando os envios...*", parse_mode="Markdown")
+            threading.Thread(target=enviar_lote_videos, args=(chat_id,)).start()
+        else:
+            bot.reply_to(message, "Os vídeos já estão sendo enviados.")
 
 def enviar_lote_videos(chat_id):
     sessao = sessoes_usuarios.get(chat_id)
@@ -80,76 +107,41 @@ def enviar_lote_videos(chat_id):
     
     while sessao['index'] < len(videos):
         if sessao['pausado']:
-            # Se o cliente pausou, interrompe o envio e mostra botão de continuar
-            markup = telebot.types.InlineKeyboardMarkup()
-            markup.add(telebot.types.InlineKeyboardButton("▶️ Continuar Envios", callback_data="continuar"))
-            bot.send_message(chat_id, "⏸ *Envio de vídeos pausado.*", parse_mode="Markdown", reply_markup=markup)
-            return
+            return # Interrompe a thread silenciosamente se estiver pausado
 
         video = videos[sessao['index']]
-        
-        # Cria o teclado flutuante com o botão Pausar
-        markup_pausa = telebot.types.InlineKeyboardMarkup()
-        markup_pausa.add(telebot.types.InlineKeyboardButton("⏸ Pausar", callback_data="pausar"))
-
-        # Regra de proteção: Se for o ADMIN, recebe desbloqueado. Se for cliente, recebe blindado (protect_content=True)
         is_cliente = (chat_id != ADMIN_ID)
         
         try:
-            bot.send_video(
-                chat_id, 
-                video['file_id'], 
-                protect_content=is_cliente, 
-                reply_markup=markup_pausa
-            )
-            
+            # Envia sem poluir com botão embaixo do vídeo
+            bot.send_video(chat_id, video['file_id'], protect_content=is_cliente)
             sessao['index'] += 1
             
-            # Lógica da tela de carregamento animada
+            # Tela de carregamento mais rápida
             if sessao['index'] % 10 == 0 and sessao['index'] < len(videos):
                 msg_carga = bot.send_message(chat_id, "🔄 *Preparando os próximos...*\n`🟩⬜⬜⬜` 25%", parse_mode="Markdown")
-                time.sleep(1.2)
+                time.sleep(0.6)
                 bot.edit_message_text("🔄 *Carregando do servidor...*\n`🟩🟩⬜⬜` 50%", chat_id, msg_carga.message_id, parse_mode="Markdown")
-                time.sleep(1.2)
+                time.sleep(0.6)
                 bot.edit_message_text("🔄 *Quase lá...*\n`🟩🟩🟩⬜` 75%", chat_id, msg_carga.message_id, parse_mode="Markdown")
-                time.sleep(1.2)
+                time.sleep(0.6)
                 bot.edit_message_text("✅ *Tudo pronto!*\n`🟩🟩🟩🟩` 100%", chat_id, msg_carga.message_id, parse_mode="Markdown")
-                time.sleep(1.0) # Tempo extra para o usuário ler "Tudo pronto!"
+                time.sleep(0.7)
                 bot.delete_message(chat_id, msg_carga.message_id)
-                time.sleep(0.5) # Tempo extra de respiro para o vídeo não cair atropelando o anterior
+                time.sleep(0.3) 
             else:
-                time.sleep(1.5) # Pausa padrão constante entre cada vídeo
+                # Intervalo mais rápido entre um vídeo e outro (0.7 segundos em vez de 1.5s)
+                time.sleep(0.7)
                 
         except Exception as e:
             print(f"Erro no envio: {e}")
             sessao['index'] += 1
 
     if sessao['index'] >= len(videos):
-        bot.send_message(chat_id, "🎯 Todos os vídeos foram enviados com sucesso!")
+        # Remove o teclado fixo de pausar/continuar quando acaba
+        markup_remover = telebot.types.ReplyKeyboardRemove()
+        bot.send_message(chat_id, "🎯 Todos os vídeos foram enviados com sucesso!", reply_markup=markup_remover)
         del sessoes_usuarios[chat_id]
-
-# Função que escuta os cliques nos botões flutuantes
-@bot.callback_query_handler(func=lambda call: call.data in ["pausar", "continuar"])
-def botoes_pausa_acao(call):
-    chat_id = call.message.chat.id
-    sessao = sessoes_usuarios.get(chat_id)
-    
-    if not sessao:
-        bot.answer_callback_query(call.id, "Sessão expirada. Digite /start de novo.", show_alert=True)
-        return
-
-    if call.data == "pausar":
-        sessao['pausado'] = True
-        bot.answer_callback_query(call.id, "Pausando...")
-        # Remove o botão de pausa daquele vídeo específico para limpar a tela
-        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-
-    elif call.data == "continuar":
-        sessao['pausado'] = False
-        bot.answer_callback_query(call.id, "Continuando o envio...")
-        bot.delete_message(chat_id, call.message.message_id) # Apaga o aviso de pausa
-        # Retoma o processo de onde parou em segundo plano
-        threading.Thread(target=enviar_lote_videos, args=(chat_id,)).start()
 
 @bot.message_handler(content_types=['video'])
 def handle_video(message):
@@ -164,4 +156,3 @@ def handle_video(message):
 
 print("Bot iniciado...")
 bot.infinity_polling()
-
