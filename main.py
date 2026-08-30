@@ -21,6 +21,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 NOMES_FAKES = ["João V.", "Marcos Silva", "Lucas", "Gabriel_99", "Pedro H.", "Rafa", "Thiago", "Mateus_01", "Diego", "Carlos", "Ana", "Bia_12", "Vitor"]
 
 motor_rodando = False
+index_estoque = 0  # <--- Variável que controla a fila para criar o Loop Infinito
 
 @bot.message_handler(commands=['start', 'ajuda'])
 def send_welcome(message):
@@ -46,7 +47,7 @@ def ligar_motor(message):
         return
         
     motor_rodando = True
-    bot.reply_to(message, "✅ *Fluxo Intenso LIGADO!*\nO bot vai metralhar mensagens no grupo.", parse_mode="Markdown")
+    bot.reply_to(message, "✅ *Fluxo Intenso LIGADO!*\nO bot vai metralhar mensagens no grupo em Loop.", parse_mode="Markdown")
     threading.Thread(target=loop_postagens_automaticas).start()
 
 @bot.message_handler(commands=['desligar'])
@@ -101,15 +102,22 @@ def guardar_no_estoque(message):
 
 def loop_postagens_automaticas():
     global motor_rodando
+    global index_estoque
+    
     while motor_rodando:
         try:
-            res = supabase.table('estoque_vip').select('*').execute()
+            # Puxa os dados em ordem de criação (do mais antigo para o mais novo)
+            res = supabase.table('estoque_vip').select('*').order('id').execute()
             conteudos = res.data
         except Exception:
             conteudos = []
         
         if conteudos:
-            item = random.choice(conteudos)
+            # Se o index chegar no final da lista, ele zera e volta pro começo (Loop Infinito)
+            if index_estoque >= len(conteudos):
+                index_estoque = 0
+                
+            item = conteudos[index_estoque]
             nome_fake = random.choice(NOMES_FAKES)
             assinatura = f"👤 *{nome_fake}:* "
 
@@ -126,9 +134,15 @@ def loop_postagens_automaticas():
                     legenda = f"{assinatura}\n{item['texto']}" if item['texto'] else assinatura
                     bot.send_video(GRUPO_VIP_ID, item['file_id'], caption=legenda, parse_mode="Markdown")
                     
+                # Avança para a próxima mensagem do estoque
+                index_estoque += 1
+                
             except Exception as e:
                 print(f"Erro ao postar: {e}")
+                # Mesmo dando erro (ex: bot foi tirado de adm), avança para não travar num arquivo corrompido
+                index_estoque += 1 
         
+        # Sorteia o tempo de espera antes da próxima mensagem para parecer humano
         segundos_espera = random.randint(TEMPO_MINIMO_SEGUNDOS, TEMPO_MAXIMO_SEGUNDOS)
         
         for _ in range(segundos_espera):
