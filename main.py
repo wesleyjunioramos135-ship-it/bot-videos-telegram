@@ -26,7 +26,7 @@ motor_rodando_1 = False
 motor_rodando_2 = False
 index_estoque = 0 
 
-# O estado padrão começa inativo (O bot não faz NADA se você mandar mídia solta)
+# O estado padrão começa inativo
 estado_admin = 'inativo' 
 
 @bot.message_handler(commands=['start', 'ajuda'])
@@ -34,10 +34,12 @@ def send_welcome(message):
     if message.from_user.id != ADMIN_ID: return
     texto = (
         "🤖 *MOTOR VIP - MULTI ESTOQUE*\n\n"
-        "📦 *Como salvar conteúdos:*\n"
-        "🔹 `/salvar1` - Começa a salvar vídeos na Tabela 1\n"
-        "🔹 `/salvar2` - Começa a salvar vídeos na Tabela 2\n"
-        "🔹 `/parar` - Para de salvar (Bot entra em modo de repouso)\n\n"
+        "📦 *Como salvar e gerenciar:*\n"
+        "🔹 `/salvar1` - Começa a salvar na Tabela 1\n"
+        "🔹 `/salvar2` - Começa a salvar na Tabela 2\n"
+        "🔹 `/parar` - Para de salvar (Modo Repouso)\n"
+        "🗑️ `/limpar1` - Apaga TUDO da Tabela 1\n"
+        "🗑️ `/limpar2` - Apaga TUDO da Tabela 2\n\n"
         "▶️ *Como ligar a metralhadora:*\n"
         "🚀 `/ligar1` (ou /ligar) - Roda a Tabela 1\n"
         "🚀 `/ligar2` - Roda a Tabela 2\n"
@@ -69,6 +71,27 @@ def modo_normal(message):
     estado_admin = 'inativo'
     bot.reply_to(message, "✅ *GRAVAÇÃO PAUSADA*\nO bot entrou em modo de repouso e ignorará mídias soltas.", parse_mode="Markdown")
 
+# ================= COMANDOS DE LIMPEZA =================
+
+@bot.message_handler(commands=['limpar1'])
+def limpar_tabela1(message):
+    if message.from_user.id != ADMIN_ID: return
+    try:
+        # Deleta todos os itens cujo ID seja maior que 0 (ou seja, todos)
+        supabase.table('estoque_vip').delete().gt('id', 0).execute()
+        bot.reply_to(message, "🗑️ *Tabela 1 LIMPA com sucesso!*\nTodos os vídeos, fotos e textos foram apagados do Estoque 1.", parse_mode="Markdown")
+    except Exception as e:
+        bot.reply_to(message, f"⚠️ Erro ao limpar a Tabela 1: {e}")
+
+@bot.message_handler(commands=['limpar2'])
+def limpar_tabela2(message):
+    if message.from_user.id != ADMIN_ID: return
+    try:
+        supabase.table('estoque_vip2').delete().gt('id', 0).execute()
+        bot.reply_to(message, "🗑️ *Tabela 2 LIMPA com sucesso!*\nTodos os vídeos, fotos e textos foram apagados do Estoque 2.", parse_mode="Markdown")
+    except Exception as e:
+        bot.reply_to(message, f"⚠️ Erro ao limpar a Tabela 2: {e}")
+
 # ================= COMANDOS DO MOTOR AUTOMÁTICO =================
 
 @bot.message_handler(commands=['ligar', 'ligar1'])
@@ -81,7 +104,7 @@ def ligar_motor1(message):
         return
         
     motor_rodando_1 = True
-    motor_rodando_2 = False # Desliga a tabela 2 por segurança
+    motor_rodando_2 = False
     index_estoque = 0
     bot.reply_to(message, "✅ *Metralhadora Ligada (Tabela 1)!*", parse_mode="Markdown")
     threading.Thread(target=loop_postagens_automaticas, args=(1,)).start()
@@ -96,7 +119,7 @@ def ligar_motor2(message):
         return
         
     motor_rodando_2 = True
-    motor_rodando_1 = False # Desliga a tabela 1 por segurança
+    motor_rodando_1 = False
     index_estoque = 0
     bot.reply_to(message, "✅ *Metralhadora Ligada (Tabela 2)!*", parse_mode="Markdown")
     threading.Thread(target=loop_postagens_automaticas, args=(2,)).start()
@@ -137,7 +160,6 @@ def capturar_mensagens(message):
     if tipo == 'photo': file_id = message.photo[-1].file_id
     elif tipo == 'video': file_id = message.video.file_id
 
-    # O que fazer dependendo do comando que você deu antes?
     if estado_admin == 'salvar1':
         try:
             supabase.table('estoque_vip').insert({'tipo': tipo, 'file_id': file_id, 'texto': texto}).execute()
@@ -153,8 +175,6 @@ def capturar_mensagens(message):
             bot.reply_to(message, f"⚠️ Erro ao salvar 2: {e}")
             
     else:
-        # MODO INATIVO: O bot não faz ABSOLUTAMENTE NADA. 
-        # Ignora o envio silenciosamente para não atrapalhar nem vazar mídias pro grupo.
         return
 
 # ================= MOTOR AUTOMÁTICO (RODA EM SEGUNDO PLANO) =================
@@ -192,7 +212,6 @@ def loop_postagens_automaticas(tabela_num):
                 index_estoque += 1
                 
             except ApiTelegramException as e:
-                # FREIO DE SEGURANÇA: Espera se o Telegram der bloqueio de velocidade
                 if e.error_code == 429:
                     tempo_punicao = e.result_json['parameters']['retry_after']
                     time.sleep(tempo_punicao)
@@ -201,7 +220,6 @@ def loop_postagens_automaticas(tabela_num):
             except Exception as e:
                 index_estoque += 1
         
-        # Sorteia 1 a 3 segundos (Velocidade Máxima)
         segundos_espera = random.randint(TEMPO_MINIMO_SEGUNDOS, TEMPO_MAXIMO_SEGUNDOS)
         
         for _ in range(segundos_espera):
@@ -209,5 +227,6 @@ def loop_postagens_automaticas(tabela_num):
                 break
             time.sleep(1)
 
-print("Bot Multi-Estoque Iniciado...")
+print("Bot Multi-Estoque com Limpeza Iniciado...")
 bot.infinity_polling()
+
