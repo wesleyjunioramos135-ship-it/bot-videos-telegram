@@ -16,17 +16,20 @@ LINK_ADMIN_PRIVADO = "https://t.me/agiuavipp"
 
 # Configurações de exibição de Anúncio
 PRIMEIRO_ANUNCIO = 20        # Primeiro anúncio após 20 vídeos
-PROXIMOS_ANUNCIOS = 50       # Anúncios seguintes a cada 50 vídeos (70, 120, 170...)
+PROXIMOS_ANUNCIOS = 50       # Anúncios seguintes a cada 50 vídeos
 TEMPO_ANUNCIO_SEGUNDOS = 10  # Duração da barra de progresso do anúncio
+TEMPO_INSISTENCIA_MINUTOS = 15 # Tempo em minutos para ficar insistindo no final
 
 bot = telebot.TeleBot(API_TOKEN)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 sessoes_usuarios = {}
 aguardando_anuncio = {}
+usuarios_concluidos = set() # Lista de clientes que já viram tudo para receber spam de 15 min
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    # Se o cliente der /start, removemos o teclado antigo para ele por a senha
     markup_remover = telebot.types.ReplyKeyboardRemove()
     msg = bot.send_message(message.chat.id, "👋 Olá! Insira a sua senha de acesso:", reply_markup=markup_remover)
     bot.register_next_step_handler(msg, process_password)
@@ -64,6 +67,9 @@ def process_password(message):
     chat_id = message.chat.id
     senha_digitada = message.text.strip()
     cliente_info = f"@{message.from_user.username}" if message.from_user.username else f"ID {message.from_user.id}"
+    
+    # Se ele tentar logar de novo, tira da lista de concluídos para parar o loop de insistência anterior
+    usuarios_concluidos.discard(chat_id)
     
     # Montando o teclado com Pausar, Continuar e Comprar VIP
     markup_controles = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -118,10 +124,15 @@ def controles_inferiores(message):
         )
         return
 
+    # Se as prévias já acabaram e ele ficar apertando pausar ou continuar:
+    if chat_id in usuarios_concluidos:
+        bot.reply_to(message, "⚠️ *As prévias já acabaram!*\nNão há mais vídeos para pausar ou continuar. Clique em ⭐ *Comprar VIP* para acessar o grupo completo.", parse_mode="Markdown")
+        return
+
     sessao = sessoes_usuarios.get(chat_id)
     
     if not sessao:
-        bot.reply_to(message, "Nenhum envio em andamento.", reply_markup=telebot.types.ReplyKeyboardRemove())
+        bot.reply_to(message, "Nenhum envio em andamento.")
         return
         
     if message.text == "⏸ Pausar":
@@ -162,12 +173,18 @@ def enviar_lote_videos(chat_id):
             
             # Checa se chegou ao fim absoluto de todos os vídeos
             if sessao['index'] >= len(videos):
-                markup_remover = telebot.types.ReplyKeyboardRemove()
-                bot.send_message(chat_id, "🎯 *As prévias acabaram por aqui!*", parse_mode="Markdown", reply_markup=markup_remover)
+                # Aviso que acabou (mantendo o teclado intacto para ele clicar em comprar VIP)
+                bot.send_message(chat_id, "🎯 *As prévias acabaram por aqui!*", parse_mode="Markdown")
+                
+                # Marca o usuário como concluído para os botões e para o loop
+                usuarios_concluidos.add(chat_id)
                 
                 # Dispara o anúncio final obrigatório focado 100% no VIP
                 enviar_anuncio_final_vip(chat_id)
                 del sessoes_usuarios[chat_id]
+                
+                # INICIA A THREAD DE INSISTÊNCIA (de 15 em 15 minutos)
+                threading.Thread(target=loop_insistencia_vip, args=(chat_id,)).start()
                 return
 
             # Lógica 20/50 para exibição dos anúncios intermediários
@@ -252,14 +269,14 @@ def executar_fluxo_anuncio(chat_id):
     )
 
 def enviar_anuncio_final_vip(chat_id):
-    """Envia o anúncio final obrigatório quando todas as prévias terminam."""
+    """Envia o anúncio final obrigatório."""
     res = supabase.table('anuncios').select('*').order('id', desc=True).limit(1).execute()
     
     legenda_final = (
         "🚨 *AS PRÉVIAS ACABARAM POR AQUI!* 🚨\n\n"
         "Você assistiu a todo o nosso conteúdo de demonstração.\n\n"
         "🔥 *Quer continuar assistindo sem limites, com atualizações diárias e acesso liberado ao grupo principal?*\n\n"
-        "⭐ Garanta seu acesso VIP agora mesmo clicando no botão abaixo!"
+        "⭐ Garanta seu acesso VIP agora mesmo clicando no botão abaixo ou no teclado!"
     )
     
     is_cliente = (chat_id != ADMIN_ID)
@@ -274,12 +291,25 @@ def enviar_anuncio_final_vip(chat_id):
             if anuncio['tipo'] == 'photo':
                 bot.send_photo(chat_id, anuncio['file_id'], caption=legenda_final, parse_mode="Markdown", reply_markup=markup, protect_content=is_cliente)
             else:
-                bot.send_video(chat_id, anuncio['file_id'], caption=legenda_final, parse_mode="Markdown", protect_content=is_cliente)
+                bot.send_video(chat_id, anuncio['file_id'], caption=legenda_final, parse_mode="Markdown", reply_markup=markup, protect_content=is_cliente)
             return
         except Exception as e:
             print(f"Erro ao enviar mídia final do anúncio: {e}")
             
     bot.send_message(chat_id, legenda_final, parse_mode="Markdown", reply_markup=markup)
+
+def loop_insistencia_vip(chat_id):
+    """Fica enviando a cobrança de 15 em 15 minutos até a pessoa interagir de novo ou o bot reiniciar"""
+    tempo_segundos = TEMPO_INSISTENCIA_MINUTOS * 60
+    while chat_id in usuarios_concluidos:
+        time.sleep(tempo_segundos)
+        
+        # Confere de novo se ele ainda tá na lista antes de mandar a mensagem
+        if chat_id in usuarios_concluidos:
+            try:
+                enviar_anuncio_final_vip(chat_id)
+            except Exception as e:
+                print(f"Erro ao enviar insistência: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data == "continuar_previas")
 def continuar_previas_callback(call):
@@ -332,7 +362,8 @@ def handle_media(message):
             supabase.table('videos').insert({'file_id': file_id}).execute()
             bot.reply_to(message, "📁 Vídeo cadastrado com sucesso no banco!")
         except Exception:
-            bot.reply_to(message, "⚠️ Erro yt ao salvar vídeo.")
+            bot.reply_to(message, "⚠️ Erro ao salvar vídeo.")
 
 print("Bot iniciado...")
 bot.infinity_polling()
+
