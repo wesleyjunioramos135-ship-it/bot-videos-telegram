@@ -160,11 +160,21 @@ def enviar_lote_videos(chat_id):
             bot.send_video(chat_id, video['file_id'], protect_content=is_cliente)
             sessao['index'] += 1
             
-            # Lógica 20/50 para exibição do anúncio
+            # Checa se chegou ao fim absoluto de todos os vídeos
+            if sessao['index'] >= len(videos):
+                markup_remover = telebot.types.ReplyKeyboardRemove()
+                bot.send_message(chat_id, "🎯 *As prévias acabaram por aqui!*", parse_mode="Markdown", reply_markup=markup_remover)
+                
+                # Dispara o anúncio final obrigatório focado 100% no VIP
+                enviar_anuncio_final_vip(chat_id)
+                del sessoes_usuarios[chat_id]
+                return
+
+            # Lógica 20/50 para exibição dos anúncios intermediários
             videos_enviados = sessao['index']
             deve_mostrar_anuncio = (videos_enviados == PRIMEIRO_ANUNCIO) or (videos_enviados > PRIMEIRO_ANUNCIO and (videos_enviados - PRIMEIRO_ANUNCIO) % PROXIMOS_ANUNCIOS == 0)
             
-            if deve_mostrar_anuncio and videos_enviados < len(videos):
+            if deve_mostrar_anuncio:
                 sessao['esperando_decisao'] = True
                 threading.Thread(target=executar_fluxo_anuncio, args=(chat_id,)).start()
                 return
@@ -174,11 +184,6 @@ def enviar_lote_videos(chat_id):
         except Exception as e:
             print(f"Erro no envio de vídeo: {e}")
             sessao['index'] += 1
-
-    if sessao['index'] >= len(videos):
-        markup_remover = telebot.types.ReplyKeyboardRemove()
-        bot.send_message(chat_id, "🎯 Todas as prévias disponíveis foram exibidas! Venha para o VIP!", reply_markup=markup_remover)
-        del sessoes_usuarios[chat_id]
 
 def gerar_barra_progresso(progresso_atual, total=10):
     preenchido = int((progresso_atual / total) * 10)
@@ -201,7 +206,6 @@ def executar_fluxo_anuncio(chat_id):
     
     is_cliente = (chat_id != ADMIN_ID)
     
-    # Envio da mídia promocional
     if res.data:
         anuncio = res.data[0]
         try:
@@ -215,7 +219,6 @@ def executar_fluxo_anuncio(chat_id):
     else:
         bot.send_message(chat_id, legenda_anuncio, parse_mode="Markdown")
 
-    # Barra de progresso animada com tempo restante
     msg_progresso = bot.send_message(
         chat_id, 
         f"⏳ *Exibindo anúncio VIP...*\n`{gerar_barra_progresso(0, TEMPO_ANUNCIO_SEGUNDOS)}`\nRestam {TEMPO_ANUNCIO_SEGUNDOS}s para continuar.", 
@@ -236,7 +239,6 @@ def executar_fluxo_anuncio(chat_id):
         except Exception:
             pass
 
-    # Botões de decisão após o anúncio finalizar
     markup = telebot.types.InlineKeyboardMarkup(row_width=1)
     btn_vip = telebot.types.InlineKeyboardButton("⭐ COMPRAR O VIP AGORA", url=LINK_ADMIN_PRIVADO)
     btn_continuar = telebot.types.InlineKeyboardButton("🎬 Continuar Assistindo Prévias", callback_data="continuar_previas")
@@ -248,6 +250,36 @@ def executar_fluxo_anuncio(chat_id):
         reply_markup=markup,
         parse_mode="Markdown"
     )
+
+def enviar_anuncio_final_vip(chat_id):
+    """Envia o anúncio final obrigatório quando todas as prévias terminam."""
+    res = supabase.table('anuncios').select('*').order('id', desc=True).limit(1).execute()
+    
+    legenda_final = (
+        "🚨 *AS PRÉVIAS ACABARAM POR AQUI!* 🚨\n\n"
+        "Você assistiu a todo o nosso conteúdo de demonstração.\n\n"
+        "🔥 *Quer continuar assistindo sem limites, com atualizações diárias e acesso liberado ao grupo principal?*\n\n"
+        "⭐ Garanta seu acesso VIP agora mesmo clicando no botão abaixo!"
+    )
+    
+    is_cliente = (chat_id != ADMIN_ID)
+    
+    markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+    btn_vip = telebot.types.InlineKeyboardButton("⭐ COMPRAR ACESSO VIP COMPLETO", url=LINK_ADMIN_PRIVADO)
+    markup.add(btn_vip)
+    
+    if res.data:
+        anuncio = res.data[0]
+        try:
+            if anuncio['tipo'] == 'photo':
+                bot.send_photo(chat_id, anuncio['file_id'], caption=legenda_final, parse_mode="Markdown", reply_markup=markup, protect_content=is_cliente)
+            else:
+                bot.send_video(chat_id, anuncio['file_id'], caption=legenda_final, parse_mode="Markdown", protect_content=is_cliente)
+            return
+        except Exception as e:
+            print(f"Erro ao enviar mídia final do anúncio: {e}")
+            
+    bot.send_message(chat_id, legenda_final, parse_mode="Markdown", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data == "continuar_previas")
 def continuar_previas_callback(call):
@@ -287,7 +319,7 @@ def handle_media(message):
             supabase.table('anuncios').insert({'file_id': file_id, 'tipo': tipo}).execute()
             bot.reply_to(
                 message, 
-                f"✅ *Mídia do Anúncio VIP cadastrada!*\nEla será exibida após os primeiros {PRIMEIRO_ANUNCIO} vídeos e depois a cada {PROXIMOS_ANUNCIOS}.", 
+                f"✅ *Mídia do Anúncio VIP cadastrada!*\nEla será exibida após os primeiros {PRIMEIRO_ANUNCIO} vídeos, a cada {PROXIMOS_ANUNCIOS} seguintes, e no encerramento das prévias.", 
                 parse_mode="Markdown"
             )
         except Exception:
@@ -300,8 +332,7 @@ def handle_media(message):
             supabase.table('videos').insert({'file_id': file_id}).execute()
             bot.reply_to(message, "📁 Vídeo cadastrado com sucesso no banco!")
         except Exception:
-            bot.reply_to(message, "⚠️ Erro ao salvar vídeo.")
+            bot.reply_to(message, "⚠️ Erro yt ao salvar vídeo.")
 
 print("Bot iniciado...")
 bot.infinity_polling()
-        
