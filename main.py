@@ -6,7 +6,7 @@ import threading
 from supabase import create_client, Client
 
 # ================= CONFIGURAÇÕES =================
-API_TOKEN = '8925863309:AAGvXZoeDMBENFtcneZOy7aW61yZCdKMeT4'
+API_TOKEN = '8507755956:AAF2Zz39Z5cLtov8U7JGhuwAMXbRVl5SaUY'
 SUPABASE_URL = 'https://modoniggvueoemhyyfsx.supabase.co'
 SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1vZG9uaWdndnVlb2VtaHl5ZnN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgwMjA5ODQsImV4cCI6MjEwMzU5Njk4NH0.uRxXnRijkkkq6NYilV3nXKTwWQ4K-CVXq5pJgqCv1U4' 
 ADMIN_ID = 8237036306
